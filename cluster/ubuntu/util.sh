@@ -107,73 +107,6 @@ function trap-add {
   trap "${handler}" ${signal}
 }
 
-function verify-cluster {
-  ii=0
-
-  for i in ${nodes}
-  do
-    if [ "${roles[${ii}]}" == "a" ]; then
-      verify-master
-    elif [ "${roles[${ii}]}" == "i" ]; then
-      verify-node $i
-    elif [ "${roles[${ii}]}" == "ai" ]; then
-      verify-master
-      verify-node $i
-    else
-      echo "unsupported role for ${i}. please check"
-      exit 1
-    fi
-
-    ((ii=ii+1))
-  done
-
-  echo
-  echo "Kubernetes cluster is running.  The master is running at:"
-  echo
-  echo "  http://${MASTER_IP}:8080"
-  echo
-
-}
-
-function verify-master(){
-  # verify master has all required daemons
-  printf "Validating master"
-  local -a required_daemon=("kube-apiserver" "kube-controller-manager" "kube-scheduler")
-  local validated="1"
-  until [[ "$validated" == "0" ]]; do
-    validated="0"
-    local daemon
-    for daemon in "${required_daemon[@]}"; do
-      ssh $SSH_OPTS "$MASTER" "pgrep -f ${daemon}" >/dev/null 2>&1 || {
-        printf "."
-        validated="1"
-        sleep 2
-      }
-    done
-  done
-  printf "\n"
-
-}
-
-function verify-node(){
-  # verify node has all required daemons
-  printf "Validating ${1}"
-  local -a required_daemon=("kube-proxy" "kubelet" "docker")
-  local validated="1"
-  until [[ "$validated" == "0" ]]; do
-    validated="0"
-    local daemon
-    for daemon in "${required_daemon[@]}"; do
-      ssh $SSH_OPTS "$1" "pgrep -f $daemon" >/dev/null 2>&1 || {
-        printf "."
-        validated="1"
-        sleep 2
-      }
-    done
-  done
-  printf "\n"
-}
-
 function create-etcd-opts(){
   cat <<EOF > ~/kube/default/etcd
 ETCD_OPTS="-name infra
@@ -317,7 +250,6 @@ function kube-up() {
   done
   wait
 
-  verify-cluster
   detect-master
   export CONTEXT="ubuntu"
   export KUBE_SERVER="http://${KUBE_MASTER_IP}:8080"
@@ -485,7 +417,6 @@ function push-master {
     fi
     ((ii=ii+1))
   done
-  verify-cluster
 }
 
 # Update a kubernetes node with required release
@@ -525,8 +456,6 @@ function push-node() {
   done
   if [[ "${existing}" == false ]]; then
     echo "node ${node_ip} does not exist"
-  else
-    verify-cluster
   fi 
   
 }
@@ -579,7 +508,6 @@ function kube-push {
     fi
     ((ii=ii+1))
   done
-  verify-cluster
 }
 
 # Perform preparations required to run e2e tests
