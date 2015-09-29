@@ -8,7 +8,7 @@
 {% set cloud_config_mount = "" -%}
 {% set cloud_config_volume = "" -%}
 
-{% if grains.cloud is defined -%}
+{% if grains.cloud is defined and not grains.cloud in [ 'baremetal' ] -%}
   {% set cloud_provider = "--cloud-provider=" + grains.cloud -%}
 
   {% if grains.cloud in [ 'aws', 'gce' ] and grains.cloud_config is defined -%}
@@ -56,7 +56,7 @@
 {% set client_ca_file = "" -%}
 
 {% set secure_port = "6443" -%}
-{% if grains['cloud'] is defined and grains.cloud in [ 'aws', 'gce', 'vagrant' ]    %}
+{% if grains['cloud'] is defined and grains.cloud in [ 'aws', 'gce', 'vagrant', 'baremetal' ]    %}
   {% set secure_port = "443" -%}
   {% set client_ca_file = "--client-ca-file=/srv/kubernetes/ca.crt" -%}
 {% endif -%}
@@ -70,12 +70,12 @@
 {% endif -%}
 
 {% if grains.cloud is defined -%}
-{% if grains.cloud in [ 'aws', 'gce', 'vagrant' ] -%}
+{% if grains.cloud in [ 'aws', 'gce', 'vagrant', 'baremetal' ] -%}
     {% set token_auth_file = "--token-auth-file=/srv/kubernetes/known_tokens.csv" -%}
 {% endif -%}
 {% endif -%}
 
-{% if grains['cloud'] is defined and grains.cloud in [ 'aws', 'gce', 'vagrant']  %}
+{% if grains['cloud'] is defined and grains.cloud in [ 'aws', 'gce', 'vagrant', 'baremetal']  %}
   {% set basic_auth_file = "--basic-auth-file=/srv/kubernetes/basic_auth.csv" -%}
 {% endif -%}
 
