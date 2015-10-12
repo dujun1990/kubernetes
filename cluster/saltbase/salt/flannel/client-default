@@ -1,0 +1,15 @@
+{% set daemon_args = "$DAEMON_ARGS" -%}
+
+{% if grains.api_servers is defined -%}
+  {% set flannel_servers = "--remote=" + grains.api_servers + ":8888" -%}
+{% elif grains.apiservers is defined -%} # TODO(remove after 0.16.0): Deprecated form
+  {% set flannel_servers = "--remote=" + grains.api_servers + ":8888" -%}
+{% elif grains['roles'][0] == 'kubernetes-master' -%}
+  {% set master_ipv4 = salt['grains.get']('fqdn_ip4')[0] -%}
+  {% set flannel_servers = "--remote=" + master_ipv4 + ":8888" -%}
+{% else -%}
+  {% set ips = salt['mine.get']('roles:kubernetes-master', 'network.ip_addrs', 'grain').values() -%}
+  {% set flannel_servers = "--remote=" + ips[0][0] + ":8888" -%}
+{% endif -%}
+
+DAEMON_ARGS="{{daemon_args}} {{flannel_servers}}"

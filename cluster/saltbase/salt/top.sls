@@ -9,6 +9,9 @@ base:
 
   'roles:kubernetes-pool':
     - match: grain
+{% if grains['cloud'] is defined and grains['cloud'] == 'baremetal' %}
+    - flannel
+{% endif %}
     - docker
 {% if grains['cloud'] is defined and grains['cloud'] == 'azure' %}
     - openvpn-client
@@ -71,6 +74,10 @@ base:
     - kube-addons
 {% if grains['cloud'] is defined and grains['cloud'] == 'azure' %}
     - openvpn
+{% endif %}
+{% if grains['cloud'] is defined and grains['cloud'] == 'baremetal' %}
+    - flannel-etcd
+    - flannel
 {% endif %}
 {% if grains['cloud'] is defined and grains['cloud'] in [ 'vagrant', 'gce', 'aws', 'baremetal' ] %}
     - docker
