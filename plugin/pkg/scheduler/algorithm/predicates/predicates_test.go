@@ -24,6 +24,7 @@ import (
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/plugin/pkg/scheduler/algorithm"
+	schedulerapi "k8s.io/kubernetes/plugin/pkg/scheduler/api"
 )
 
 type FakeNodeInfo api.Node
@@ -575,7 +576,188 @@ func TestPodFitsSelector(t *testing.T) {
 			fits: false,
 			test: "node labels are subset",
 		},
+		{
+			pod: &api.Pod{
+				ObjectMeta: api.ObjectMeta{
+					Annotations: map[string]string{
+						schedulerapi.AffinityAnnotationKey: `
+						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
+							"nodeSelectorTerms": [{
+								"matchExpressions": [{
+									"key": "foo",
+									"operator": "In",
+									"values": ["bar", "value2"]
+								}]
+							}]
+						}}}`,
+					},
+				},
+			},
+			labels: map[string]string{
+				"foo": "bar",
+			},
+			fits: true,
+			test: "required node affinity scheduling requirements matches node",
+		},
+		{
+			pod: &api.Pod{
+				ObjectMeta: api.ObjectMeta{
+					Annotations: map[string]string{
+						schedulerapi.AffinityAnnotationKey: `
+						{"nodeAffinity": {
+							"requiredDuringSchedulingRequiredDuringExecution": {
+								"nodeSelectorTerms": [{
+									"matchExpressions": [{
+										"key": "foo",
+										"operator": "In",
+										"values": ["bar", "value2"]
+									}]
+								}]
+							},
+							"requiredDuringSchedulingIgnoredDuringExecution": {
+								"nodeSelectorTerms": [{
+									"matchExpressions": [{
+										"key": "foo",
+										"operator": "NotIn",
+										"values": ["bar", "value2"]
+									}]
+								}]
+							}
+						}}`,
+					},
+				},
+			},
+			labels: map[string]string{
+				"foo": "bar",
+			},
+			fits: true,
+			test: "Affinity with both requiredDuringSchedulingRequiredDuringExecution and requiredDuringSchedulingIgnoredDuringExecution indicated matches the node",
+		},
+		{
+			pod: &api.Pod{
+				ObjectMeta: api.ObjectMeta{
+					Annotations: map[string]string{
+						schedulerapi.AffinityAnnotationKey: `
+						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
+							"nodeSelectorTerms": [{
+								"matchExpressions": [{
+									"key": "foo",
+									"operator": "In",
+									"values": ["value1", "value2"]
+								}]
+							}]
+						}}}`,
+					},
+				},
+			},
+			labels: map[string]string{
+				"foo": "bar",
+			},
+			fits: false,
+			test: "node labels don't match pod's required node affinity scheduling requirements",
+		},
+		{
+			pod: &api.Pod{
+				ObjectMeta: api.ObjectMeta{
+					Annotations: map[string]string{
+						schedulerapi.AffinityAnnotationKey: `
+						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
+							"nodeSelectorTerms": [
+								{
+									"matchExpressions": [{
+										"key": "foo",
+										"operator": "In",
+										"values": ["bar", "value2"]
+									}]
+								},
+								{
+									"matchExpressions": [{
+										"key": "diffkey",
+										"operator": "In",
+										"values": ["wrong", "value2"]
+									}]
+								}
+							]
+						}}}`,
+					},
+				},
+			},
+			labels: map[string]string{
+				"foo": "bar",
+			},
+			fits: true,
+			test: "node labels match pod's required node affinity scheduling requirements with multiple NodeSelectorTerms",
+		},
+		{
+			pod: &api.Pod{
+				ObjectMeta: api.ObjectMeta{
+					Annotations: map[string]string{
+						schedulerapi.AffinityAnnotationKey: `
+						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
+							"nodeSelectorTerms": null
+						}}}`,
+					},
+				},
+			},
+			labels: map[string]string{
+				"foo": "bar",
+			},
+			fits: false,
+			test: "node labels don't match pod's required node affinity scheduling requirements with a nil []NodeSelectorTerm",
+		},
+		{
+			pod: &api.Pod{
+				ObjectMeta: api.ObjectMeta{
+					Annotations: map[string]string{
+						schedulerapi.AffinityAnnotationKey: `
+						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
+							"nodeSelectorTerms": []
+						}}}`,
+					},
+				},
+			},
+			labels: map[string]string{
+				"foo": "bar",
+			},
+			fits: false,
+			test: "node labels don't match pod's required node affinity scheduling requirements with an empty []NodeSelectorTerm",
+		},
+		{
+			pod: &api.Pod{
+				ObjectMeta: api.ObjectMeta{
+					Annotations: map[string]string{
+						schedulerapi.AffinityAnnotationKey: `
+						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
+							"nodeSelectorTerms": [{}, {}]
+						}}}`,
+					},
+				},
+			},
+			labels: map[string]string{
+				"foo": "bar",
+			},
+			fits: false,
+			test: "Affinity with invalid NodeSelectTerms will match no objects",
+		},
+		{
+			pod: &api.Pod{
+				ObjectMeta: api.ObjectMeta{
+					Annotations: map[string]string{
+						schedulerapi.AffinityAnnotationKey: `
+						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
+							"nodeSelectorTerms": [{"matchExpressions": [{}]}]
+						}}}`,
+					},
+				},
+			},
+			labels: map[string]string{
+				"foo": "bar",
+			},
+			fits: false,
+			test: "Empty MatchExpressions is not a valid value will match no objects",
+		},
 	}
+
 	for _, test := range tests {
 		node := api.Node{ObjectMeta: api.ObjectMeta{Labels: test.labels}}
 
