@@ -18,6 +18,7 @@ package e2e
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"k8s.io/kubernetes/pkg/api"
@@ -612,6 +613,68 @@ var _ = Describe("SchedulerPredicates [Serial]", func() {
 			},
 		})
 		expectNoError(err)
+		defer c.Pods(ns).Delete(labelPodName, api.NewDeleteOptions(0))
+
+		// check that pod got scheduled. We intentionally DO NOT check that the
+		// pod is running because this will create a race condition with the
+		// kubelet and the scheduler: the scheduler might have scheduled a pod
+		// already when the kubelet does not know about its new label yet. The
+		// kubelet will then refuse to launch the pod.
+		expectNoError(waitForPodNotPending(c, ns, labelPodName))
+		labelPod, err := c.Pods(ns).Get(labelPodName)
+		expectNoError(err)
+		Expect(labelPod.Spec.NodeName).To(Equal(nodeName))
+	})
+
+	// Verify that an escaped JSON string of NodeAffinity in a YAML PodSpec works.
+	It("validates that embedding the JSON NodeAffinity setting as a string in the annotation value work [Conformance]", func() {
+		// launch a pod to find a node which can launch a pod. We intentionally do
+		// not just take the node list and choose the first of them. Depending on the
+		// cluster and the scheduler it might be that a "normal" pod cannot be
+		// scheduled onto it.
+		By("Trying to launch a pod without a label to get a node which can launch it.")
+		podName := "without-label"
+		_, err := c.Pods(ns).Create(&api.Pod{
+			TypeMeta: unversioned.TypeMeta{
+				Kind: "Pod",
+			},
+			ObjectMeta: api.ObjectMeta{
+				Name: podName,
+			},
+			Spec: api.PodSpec{
+				Containers: []api.Container{
+					{
+						Name:  podName,
+						Image: "gcr.io/google_containers/pause:2.0",
+					},
+				},
+			},
+		})
+		expectNoError(err)
+		expectNoError(waitForPodRunningInNamespace(c, podName, ns))
+		pod, err := c.Pods(ns).Get(podName)
+		expectNoError(err)
+
+		nodeName := pod.Spec.NodeName
+		err = c.Pods(ns).Delete(podName, api.NewDeleteOptions(0))
+		expectNoError(err)
+
+		By("Trying to apply a label with fake az info on the found node.")
+		k := "kubernetes.io/e2e-az-name"
+		v := "e2e-az1"
+		patch := fmt.Sprintf(`{"metadata":{"labels":{"%s":"%s"}}}`, k, v)
+		err = c.Patch(api.MergePatchType).Resource("nodes").Name(nodeName).Body([]byte(patch)).Do().Error()
+		expectNoError(err)
+
+		node, err := c.Nodes().Get(nodeName)
+		expectNoError(err)
+		Expect(node.Labels[k]).To(Equal(v))
+
+		By("Trying to launch a pod that with NodeAffinity setting as embedded JSON string in the annotation value.")
+		labelPodName := "with-labels"
+		nodeSelectionRoot := filepath.Join(testContext.RepoRoot, "docs/user-guide/node-selection")
+		testPodPath := filepath.Join(nodeSelectionRoot, "pod-with-node-affinity.yaml")
+		runKubectlOrDie("create", "-f", testPodPath, fmt.Sprintf("--namespace=%v", ns))
 		defer c.Pods(ns).Delete(labelPodName, api.NewDeleteOptions(0))
 
 		// check that pod got scheduled. We intentionally DO NOT check that the
