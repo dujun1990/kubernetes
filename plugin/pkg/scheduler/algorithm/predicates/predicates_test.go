@@ -24,7 +24,6 @@ import (
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/plugin/pkg/scheduler/algorithm"
-	schedulerapi "k8s.io/kubernetes/plugin/pkg/scheduler/api"
 )
 
 type FakeNodeInfo api.Node
@@ -580,7 +579,7 @@ func TestPodFitsSelector(t *testing.T) {
 			pod: &api.Pod{
 				ObjectMeta: api.ObjectMeta{
 					Annotations: map[string]string{
-						schedulerapi.AffinityAnnotationKey: `
+						api.AffinityAnnotationKey: `
 						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
 							"nodeSelectorTerms": [{
 								"matchExpressions": [{
@@ -603,7 +602,7 @@ func TestPodFitsSelector(t *testing.T) {
 			pod: &api.Pod{
 				ObjectMeta: api.ObjectMeta{
 					Annotations: map[string]string{
-						schedulerapi.AffinityAnnotationKey: `
+						api.AffinityAnnotationKey: `
 						{"nodeAffinity": {
 							"requiredDuringSchedulingRequiredDuringExecution": {
 								"nodeSelectorTerms": [{
@@ -637,7 +636,7 @@ func TestPodFitsSelector(t *testing.T) {
 			pod: &api.Pod{
 				ObjectMeta: api.ObjectMeta{
 					Annotations: map[string]string{
-						schedulerapi.AffinityAnnotationKey: `
+						api.AffinityAnnotationKey: `
 						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
 							"nodeSelectorTerms": [{
 								"matchExpressions": [{
@@ -660,7 +659,7 @@ func TestPodFitsSelector(t *testing.T) {
 			pod: &api.Pod{
 				ObjectMeta: api.ObjectMeta{
 					Annotations: map[string]string{
-						schedulerapi.AffinityAnnotationKey: `
+						api.AffinityAnnotationKey: `
 						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
 							"nodeSelectorTerms": [
 								{
@@ -692,7 +691,7 @@ func TestPodFitsSelector(t *testing.T) {
 			pod: &api.Pod{
 				ObjectMeta: api.ObjectMeta{
 					Annotations: map[string]string{
-						schedulerapi.AffinityAnnotationKey: `
+						api.AffinityAnnotationKey: `
 						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
 							"nodeSelectorTerms": null
 						}}}`,
@@ -709,7 +708,7 @@ func TestPodFitsSelector(t *testing.T) {
 			pod: &api.Pod{
 				ObjectMeta: api.ObjectMeta{
 					Annotations: map[string]string{
-						schedulerapi.AffinityAnnotationKey: `
+						api.AffinityAnnotationKey: `
 						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
 							"nodeSelectorTerms": []
 						}}}`,
@@ -726,7 +725,7 @@ func TestPodFitsSelector(t *testing.T) {
 			pod: &api.Pod{
 				ObjectMeta: api.ObjectMeta{
 					Annotations: map[string]string{
-						schedulerapi.AffinityAnnotationKey: `
+						api.AffinityAnnotationKey: `
 						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
 							"nodeSelectorTerms": [{}, {}]
 						}}}`,
@@ -743,7 +742,7 @@ func TestPodFitsSelector(t *testing.T) {
 			pod: &api.Pod{
 				ObjectMeta: api.ObjectMeta{
 					Annotations: map[string]string{
-						schedulerapi.AffinityAnnotationKey: `
+						api.AffinityAnnotationKey: `
 						{"nodeAffinity": { "requiredDuringSchedulingIgnoredDuringExecution": {
 							"nodeSelectorTerms": [{"matchExpressions": [{}]}]
 						}}}`,

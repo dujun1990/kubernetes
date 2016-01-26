@@ -33,7 +33,7 @@ func TestNodeAffinityPriority(t *testing.T) {
 	label5 := map[string]string{"foo": "bar", "key": "value", "az": "az1"}
 
 	affinity1 := map[string]string{
-		schedulerapi.AffinityAnnotationKey: `
+		api.AffinityAnnotationKey: `
 		{"nodeAffinity": {"PreferredDuringSchedulingIgnoredDuringExecution": [
 			{
 				"weight": 2,
@@ -48,7 +48,7 @@ func TestNodeAffinityPriority(t *testing.T) {
 	}
 
 	affinity2 := map[string]string{
-		schedulerapi.AffinityAnnotationKey: `
+		api.AffinityAnnotationKey: `
 		{"nodeAffinity": {"PreferredDuringSchedulingIgnoredDuringExecution": [
 			{
 				"weight": 2,

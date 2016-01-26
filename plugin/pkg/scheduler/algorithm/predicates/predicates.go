@@ -24,7 +24,6 @@ import (
 	client "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/plugin/pkg/scheduler/algorithm"
-	schedulerapi "k8s.io/kubernetes/plugin/pkg/scheduler/api"
 
 	"github.com/golang/glog"
 	"k8s.io/kubernetes/pkg/api/unversioned"
@@ -345,7 +344,7 @@ func PodMatchesNodeLabels(pod *api.Pod, node *api.Node) bool {
 		return false
 	}
 
-	affinity, err := schedulerapi.GetAffinityFromPod(pod)
+	affinity, err := api.GetAffinityFromPod(pod)
 	if err != nil {
 		glog.V(10).Infof("Failed to get Affinity from Pod %+v, err: %+v", podName(pod), err)
 		return false
@@ -365,7 +364,7 @@ func PodMatchesNodeLabels(pod *api.Pod, node *api.Node) bool {
 			return true
 		}
 
-		var nodeSelectorTerms []schedulerapi.NodeSelectorTerm
+		var nodeSelectorTerms []api.NodeSelectorTerm
 		if nodeAffinity.RequiredDuringSchedulingRequiredDuringExecution != nil {
 			nodeSelectorTerms = affinity.NodeAffinity.RequiredDuringSchedulingRequiredDuringExecution.NodeSelectorTerms
 		}
@@ -382,7 +381,7 @@ func PodMatchesNodeLabels(pod *api.Pod, node *api.Node) bool {
 		glog.V(10).Infof("Match for node selector terms %+v", nodeSelectorTerms)
 		nodeAffinityMatches = false
 		for _, req := range nodeSelectorTerms {
-			nodeSelector, err := schedulerapi.NodeSelectorRequirementsAsSelector(req.MatchExpressions)
+			nodeSelector, err := api.NodeSelectorRequirementsAsSelector(req.MatchExpressions)
 			if err != nil {
 				glog.V(10).Infof("Failed to parse MatchExpressions: %+v, regarding as not match.", req.MatchExpressions)
 				return false
