@@ -53,12 +53,14 @@ import (
 	proxyconfig "k8s.io/kubernetes/pkg/proxy/config"
 	"k8s.io/kubernetes/pkg/proxy/healthcheck"
 	"k8s.io/kubernetes/pkg/proxy/iptables"
+	"k8s.io/kubernetes/pkg/proxy/ipvs"
 	"k8s.io/kubernetes/pkg/proxy/userspace"
 	"k8s.io/kubernetes/pkg/proxy/winuserspace"
 	"k8s.io/kubernetes/pkg/util/configz"
 	utildbus "k8s.io/kubernetes/pkg/util/dbus"
 	"k8s.io/kubernetes/pkg/util/exec"
 	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
+	utilipvs "k8s.io/kubernetes/pkg/util/ipvs"
 	utilnetsh "k8s.io/kubernetes/pkg/util/netsh"
 	nodeutil "k8s.io/kubernetes/pkg/util/node"
 	"k8s.io/kubernetes/pkg/util/oom"
@@ -74,12 +76,13 @@ import (
 const (
 	proxyModeUserspace = "userspace"
 	proxyModeIPTables  = "iptables"
+	proxyModeIPVS      = "ipvs"
 )
 
 // checkKnownProxyMode returns true if proxyMode is valid.
 func checkKnownProxyMode(proxyMode string) bool {
 	switch proxyMode {
-	case "", proxyModeUserspace, proxyModeIPTables:
+	case "", proxyModeUserspace, proxyModeIPTables, proxyModeIPVS:
 		return true
 	}
 	return false
@@ -109,7 +112,7 @@ type Options struct {
 // AddFlags adds flags to fs and binds them to options.
 func AddFlags(options *Options, fs *pflag.FlagSet) {
 	fs.StringVar(&options.ConfigFile, "config", options.ConfigFile, "The path to the configuration file.")
-	fs.BoolVar(&options.CleanupAndExit, "cleanup-iptables", options.CleanupAndExit, "If true cleanup iptables rules and exit.")
+	fs.BoolVar(&options.CleanupAndExit, "cleanup-proxyrules", options.CleanupAndExit, "If true cleanup iptables and ipvs rules and exit.")
 
 	// All flags below here are deprecated and will eventually be removed.
 
@@ -146,6 +149,7 @@ func AddFlags(options *Options, fs *pflag.FlagSet) {
 		&options.config.Conntrack.TCPCloseWaitTimeout.Duration, "conntrack-tcp-timeout-close-wait",
 		options.config.Conntrack.TCPCloseWaitTimeout.Duration,
 		"NAT timeout for TCP connections in the CLOSE_WAIT state")
+	fs.StringVar(&options.config.Scheduler, "ipvs-scheduler", options.config.Scheduler, "ipvs scheduler type")
 
 	utilfeature.DefaultFeatureGate.AddFlag(fs)
 }
@@ -153,7 +157,7 @@ func AddFlags(options *Options, fs *pflag.FlagSet) {
 // Complete completes all the required options.
 func (o Options) Complete() error {
 	if len(o.ConfigFile) == 0 {
-		glog.Warning("WARNING: all flags other than --config and --cleanup-iptables are deprecated. Please begin using a config file ASAP.")
+		glog.Warning("WARNING: all flags other than --config and --cleanup-proxyrules are deprecated. Please begin using a config file ASAP.")
 		o.applyDeprecatedHealthzPortToConfig()
 	}
 	return nil
@@ -180,7 +184,6 @@ func (o Options) Run() error {
 			utilfeature.DefaultFeatureGate.Set(config.FeatureGates)
 		}
 	}
-
 	proxyServer, err := NewProxyServer(config, o.CleanupAndExit, o.master)
 	if err != nil {
 		return err
@@ -289,6 +292,7 @@ type ProxyServer struct {
 	Client                 clientset.Interface
 	EventClient            v1core.EventsGetter
 	IptInterface           utiliptables.Interface
+	IpvsInterface          utilipvs.Interface
 	Proxier                proxy.ProxyProvider
 	Broadcaster            record.EventBroadcaster
 	Recorder               record.EventRecorder
@@ -363,6 +367,7 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 
 	var netshInterface utilnetsh.Interface
 	var iptInterface utiliptables.Interface
+	var ipvsInterface utilipvs.Interface
 	var dbus utildbus.Interface
 
 	// Create a iptables utils.
@@ -373,11 +378,16 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 	} else {
 		dbus = utildbus.New()
 		iptInterface = utiliptables.New(execer, dbus, protocol)
+		ipvsInterface = utilipvs.New(execer, dbus)
+		err := ipvsInterface.InitIpvsInterface()
+		if err != nil {
+			return nil, fmt.Errorf("unable to init ipvs: %v", err)
+		}
 	}
 
 	// We omit creation of pretty much everything if we run in cleanup mode
 	if cleanupAndExit {
-		return &ProxyServer{IptInterface: iptInterface}, nil
+		return &ProxyServer{IptInterface: iptInterface, IpvsInterface: ipvsInterface, CleanupAndExit: cleanupAndExit}, nil
 	}
 
 	client, eventClient, err := createClients(config.ClientConnection, master)
@@ -435,6 +445,38 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 		glog.V(0).Info("Tearing down userspace rules.")
 		// TODO this has side effects that should only happen when Run() is invoked.
 		userspace.CleanupLeftovers(iptInterface)
+		ipvs.CleanupIpvsLeftovers(ipvsInterface, iptInterface)
+	} else if proxyMode == proxyModeIPVS {
+		glog.V(0).Info("Using ipvs Proxier.")
+		// TODO this has side effects that should only happen when Run() is invoked.
+		ipvsInterface := utilipvs.New(execer, dbus)
+		proxierIPVS, err := ipvs.NewProxier(
+			iptInterface,
+			ipvsInterface,
+			utilsysctl.New(),
+			execer,
+			config.IPTables.SyncPeriod.Duration,
+			config.IPTables.MinSyncPeriod.Duration,
+			config.IPTables.MasqueradeAll,
+			int(*config.IPTables.MasqueradeBit),
+			config.ClusterCIDR,
+			hostname,
+			getNodeIP(client, hostname),
+			recorder,
+			healthzServer,
+			config.Scheduler,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create proxier: %v", err)
+		}
+		proxier = proxierIPVS
+		serviceEventHandler = proxierIPVS
+		endpointsEventHandler = proxierIPVS
+		// No turning back. Remove artifacts that might still exist from the userspace Proxier.
+		glog.V(0).Info("Tearing down userspace rules.")
+		// TODO this has side effects that should only happen when Run() is invoked.
+		userspace.CleanupLeftovers(iptInterface)
+		iptables.CleanupLeftovers(iptInterface)
 	} else {
 		glog.V(0).Info("Using userspace Proxier.")
 		if runtime.GOOS == "windows" {
@@ -486,6 +528,7 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 			glog.V(0).Info("Tearing down pure-iptables proxy rules.")
 			// TODO this has side effects that should only happen when Run() is invoked.
 			iptables.CleanupLeftovers(iptInterface)
+			ipvs.CleanupIpvsLeftovers(ipvsInterface, iptInterface)
 		}
 	}
 
@@ -505,6 +548,7 @@ func NewProxyServer(config *componentconfig.KubeProxyConfiguration, cleanupAndEx
 		Client:                 client,
 		EventClient:            eventClient,
 		IptInterface:           iptInterface,
+		IpvsInterface:          ipvsInterface,
 		Proxier:                proxier,
 		Broadcaster:            eventBroadcaster,
 		Recorder:               recorder,
@@ -529,6 +573,7 @@ func (s *ProxyServer) Run() error {
 	if s.CleanupAndExit {
 		encounteredError := userspace.CleanupLeftovers(s.IptInterface)
 		encounteredError = iptables.CleanupLeftovers(s.IptInterface) || encounteredError
+		encounteredError = ipvs.CleanupIpvsLeftovers(s.IpvsInterface, s.IptInterface) || encounteredError
 		if encounteredError {
 			return errors.New("encountered an error while tearing down rules.")
 		}
@@ -671,11 +716,31 @@ func getProxyMode(proxyMode string, iptver iptables.IPTablesVersioner, kcompat i
 		return proxyModeUserspace
 	}
 
-	if len(proxyMode) > 0 && proxyMode != proxyModeIPTables {
-		glog.Warningf("Flag proxy-mode=%q unknown, assuming iptables proxy", proxyMode)
+	if len(proxyMode) > 0 && proxyMode == proxyModeIPTables {
+		return tryIPTablesProxy(iptver, kcompat)
 	}
 
+	if len(proxyMode) > 0 && proxyMode == proxyModeIPVS {
+		return tryIPVSProxy(iptver, kcompat)
+	}
+
+	glog.Warningf("Flag proxy-mode=%q unknown, assuming iptables proxy", proxyMode)
 	return tryIPTablesProxy(iptver, kcompat)
+}
+
+func tryIPVSProxy(iptver iptables.IPTablesVersioner, kcompat iptables.KernelCompatTester) string {
+	// guaranteed false on error, error only necessary for debugging
+	useIPTablesProxy, err := iptables.CanUseIPTablesProxier(iptver, kcompat)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("can't determine whether to use iptables proxy, using userspace proxier: %v", err))
+		return proxyModeUserspace
+	}
+	if useIPTablesProxy {
+		return proxyModeIPVS
+	}
+	// Fallback.
+	glog.V(1).Infof("Can't use iptables proxy, using userspace proxier")
+	return proxyModeUserspace
 }
 
 func tryIPTablesProxy(iptver iptables.IPTablesVersioner, kcompat iptables.KernelCompatTester) string {
