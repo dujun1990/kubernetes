@@ -1037,7 +1037,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 		for _, ingress := range svcInfo.loadBalancerStatus.Ingress {
 			if ingress.IP != "" {
 				args := []string{
-					"-A", string(kubeServicesChain),
+					"-I", string(kubeServicesChain),
 					"-m", "comment", "--comment", fmt.Sprintf(`"%s loadbalancer IP"`, svcNameString),
 					"-m", string(svcInfo.protocol), "-p", string(svcInfo.protocol),
 					"-d", fmt.Sprintf("%s/32", ingress.IP),
