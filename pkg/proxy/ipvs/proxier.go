@@ -930,22 +930,22 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 		// to ServicePortName.String() show up in CPU profiles.
 		svcNameString := svcName.String()
 
-		// Build session affinity flag for ipvs at first
-		var ipvsFlags ipvs.ServiceFlags
-		if svcInfo.sessionAffinityType == api.ServiceAffinityClientIP {
-			ipvsFlags |= ipvs.SFPersistent
-		}
-
 		// Capture the clusterIP.
 		// Sync Services & Endpoints
 		serv := &utilipvs.Service{
 			Address:   svcInfo.clusterIP,
 			Port:      uint16(svcInfo.port),
 			Protocol:  string(svcInfo.protocol),
-			Flags:     uint32(ipvsFlags),
 			Scheduler: string(proxier.ipvsScheduler),
-			Timeout:   uint32(svcInfo.stickyMaxAgeMinutes * 60),
 		}
+		// Build session affinity flag for ipvs at first
+		var ipvsFlags ipvs.ServiceFlags
+		if svcInfo.sessionAffinityType == api.ServiceAffinityClientIP {
+			ipvsFlags |= ipvs.SFPersistent
+			serv.Flags =  uint32(ipvsFlags)
+			serv.Timeout = uint32(svcInfo.stickyMaxAgeMinutes * 60)
+		}
+
 		err := proxier.syncService(svcNameString, serv, true)
 		if err == nil {
 			activeServices[serv.Address.String()+":"+fmt.Sprintf("%d", serv.Port)+"/"+serv.Protocol] = true
@@ -993,7 +993,9 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 				Protocol:  string(svcInfo.protocol),
 				Flags:     uint32(ipvsFlags),
 				Scheduler: string(proxier.ipvsScheduler),
-				Timeout:   uint32(svcInfo.stickyMaxAgeMinutes * 60),
+			}
+			if svcInfo.sessionAffinityType == api.ServiceAffinityClientIP {
+				serv.Timeout = uint32(svcInfo.stickyMaxAgeMinutes * 60)
 			}
 			err := proxier.syncService(svcNameString, serv, false)
 			if err == nil {
@@ -1054,7 +1056,9 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 					Protocol:  string(svcInfo.protocol),
 					Flags:     uint32(ipvsFlags),
 					Scheduler: string(proxier.ipvsScheduler),
-					Timeout:   uint32(svcInfo.stickyMaxAgeMinutes * 60),
+				}
+				if svcInfo.sessionAffinityType == api.ServiceAffinityClientIP {
+					serv.Timeout = uint32(svcInfo.stickyMaxAgeMinutes * 60)
 				}
 				err = proxier.syncService(svcNameString, serv, false)
 				if err == nil {
@@ -1100,7 +1104,9 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 						Protocol:  string(svcInfo.protocol),
 						Flags:     uint32(ipvsFlags),
 						Scheduler: string(proxier.ipvsScheduler),
-						Timeout:   uint32(svcInfo.stickyMaxAgeMinutes * 60),
+					}
+					if svcInfo.sessionAffinityType == api.ServiceAffinityClientIP {
+						serv.Timeout = uint32(svcInfo.stickyMaxAgeMinutes * 60)
 					}
 
 					// NO need to set alias device
