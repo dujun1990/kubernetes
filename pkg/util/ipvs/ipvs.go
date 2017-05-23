@@ -25,10 +25,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/docker/libnetwork/ipvs"
 	godbus "github.com/godbus/dbus"
 	"github.com/golang/glog"
-	//"github.com/google/seesaw/ipvs"
-	"github.com/docker/libnetwork/ipvs"
 	utildbus "k8s.io/kubernetes/pkg/util/dbus"
 	utilexec "k8s.io/kubernetes/pkg/util/exec"
 	utilsysctl "k8s.io/kubernetes/pkg/util/sysctl"
@@ -46,10 +45,6 @@ const (
 	ipvsSvcFlagPersist   = 0x1
 	ipvsSvcFlagHashed    = 0x2
 	ipvsSvcFlagOnePacket = 0x4
-
-	SFPersistent uint32 = ipvsSvcFlagPersist
-	SFHashed     uint32 = ipvsSvcFlagHashed
-	SFOnePacket  uint32 = ipvsSvcFlagOnePacket
 )
 
 // Replica of IPVS Service.
@@ -67,7 +62,6 @@ func (svc *Service) Equal(other *Service) bool {
 		svc.Protocol == other.Protocol &&
 		svc.Port == other.Port &&
 		svc.Scheduler == other.Scheduler &&
-		svc.Flags == other.Flags &&
 		svc.Timeout == other.Timeout
 }
 
@@ -86,7 +80,18 @@ var ipvsModules = []string{
 	"nf_conntrack_ipv4",
 }
 
-const AliasDevice string = "ipvs0"
+const AliasDevice = "kube0"
+
+const (
+	SFPersistent ServiceFlags = ipvsSvcFlagPersist
+	SFHashed     ServiceFlags = ipvsSvcFlagHashed
+	SFOnePacket  ServiceFlags = ipvsSvcFlagOnePacket
+)
+
+// ServiceFlags specifies the flags for a IPVS service.
+type ServiceFlags uint32
+
+const DefaultIpvsScheduler = "rr"
 
 // An injectable interface for running iptables commands.  Implementations must be goroutine-safe.
 type Interface interface {
@@ -95,12 +100,11 @@ type Interface interface {
 	DeleteAliasDevice(aliasDev string) error
 	SetAlias(serv *Service) error
 	UnSetAlias(serv *Service) error
-	//GetVersion() string
 	AddService(*Service) error
 	UpdateService(*Service) error
 	DeleteService(*Service) error
-	GetService(*Service) (*ipvs.Service, error)
-	GetServices() ([]*ipvs.Service, error)
+	GetService(*Service) (*Service, error)
+	GetServices() ([]*Service, error)
 	AddReloadFunc(reloadFunc func())
 	Flush() error
 	Destroy()
@@ -109,8 +113,6 @@ type Interface interface {
 	GetDestinations(*Service) ([]*Destination, error)
 	UpdateDestination(*Service, *Destination) error
 	DeleteDestination(*Service, *Destination) error
-
-	ToService(*ipvs.Service) (*Service, error)
 }
 
 type Protocol byte
@@ -238,7 +240,6 @@ func (runner *runner) AddService(svc *Service) error {
 	if svc.Scheduler == "" {
 		svc.Scheduler = DefaultIPVSScheduler
 	}
-	fmt.Println("Add Service:" + strconv.Itoa(int(svc.Timeout)))
 
 	return ipvs_handle.NewService(NewIpvsService(svc))
 }
@@ -408,22 +409,36 @@ func (runner *runner) reload() {
 	}
 }
 
-func (runner *runner) GetService(svc *Service) (*ipvs.Service, error) {
+func (runner *runner) GetService(svc *Service) (*Service, error) {
 	ipvsService, err := ipvs_handle.GetService(NewIpvsService(svc))
 	if err != nil {
 		return nil, err
 	}
-
-	return ipvsService, nil
+	var rsvc *Service
+	rsvc, err = toService(ipvsService)
+	if err != nil {
+		return nil, err
+	}
+	return rsvc, nil
 }
 
-func (runner *runner) GetServices() ([]*ipvs.Service, error) {
+func (runner *runner) GetServices() ([]*Service, error) {
 	ipvsServices, err := ipvs_handle.GetServices()
 	if err != nil {
 		return nil, err
 	}
 
-	return ipvsServices, nil
+	svcs := make([]*Service, 0)
+
+	for _, ipvsService := range ipvsServices {
+		svc, err := toService(ipvsService)
+		if err != nil {
+			return nil, err
+		}
+		svcs = append(svcs, svc)
+	}
+
+	return svcs, nil
 }
 
 func (runner *runner) Flush() error {
@@ -432,11 +447,10 @@ func (runner *runner) Flush() error {
 		return err
 	}
 	for _, service := range Services {
-		svc, err := runner.ToService(service)
+		err := runner.DeleteService(service)
 		if err != nil {
 			return err
 		}
-		runner.DeleteService(svc)
 	}
 	return nil
 }
@@ -489,7 +503,7 @@ func (runner *runner) GetDestinations(svc *Service) ([]*Destination, error) {
 	}
 
 	for _, dest := range Destinations {
-		dst, err := runner.ToDestination(dest)
+		dst, err := toDestination(dest)
 		if err != nil {
 			return nil, err
 		}
@@ -502,7 +516,7 @@ func (runner *runner) GetDestinations(svc *Service) ([]*Destination, error) {
 
 // toService converts a service entry from its IPVS representation to the Go
 // equivalent Service structure.
-func (runner *runner) ToService(svc *ipvs.Service) (*Service, error) {
+func toService(svc *ipvs.Service) (*Service, error) {
 	if svc == nil {
 		return nil, errors.New("Invalid Service Interface")
 	}
@@ -519,7 +533,7 @@ func (runner *runner) ToService(svc *ipvs.Service) (*Service, error) {
 
 // toDestination converts a destination entry from its IPVS representation
 // to the Go equivalent Destination structure.
-func (runner *runner) ToDestination(ipvsDst *ipvs.Destination) (*Destination, error) {
+func toDestination(ipvsDst *ipvs.Destination) (*Destination, error) {
 	if ipvsDst == nil {
 		return nil, errors.New("Invalid ipvsDst Interface")
 	}
