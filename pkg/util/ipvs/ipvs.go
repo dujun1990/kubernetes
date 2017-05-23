@@ -198,8 +198,7 @@ func (runner *runner) InitIpvsInterface() error {
 	for _, module := range ipvsModules {
 		_, err := runner.exec.Command("modprobe", module).CombinedOutput()
 		if err != nil {
-			glog.Errorf("Error: Can not load module: %s in lvs proxier", module)
-			return err
+			glog.Warningf("Error: Can not load module: %s in lvs proxier, err: %v", module, err)
 		}
 	}
 
