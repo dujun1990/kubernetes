@@ -1247,8 +1247,8 @@ func getNodeIPs() (ips []net.IP, err error) {
 		}
 		for _, a := range addrs {
 			if ipnet, ok := a.(*net.IPNet); ok {
-				if ipnet.IP != nil {
-					ips = append(ips, ipnet.IP)
+				if ipnet.IP.To4() != nil {
+					ips = append(ips, ipnet.IP.To4())
 				}
 			}
 		}
