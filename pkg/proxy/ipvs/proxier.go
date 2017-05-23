@@ -755,7 +755,7 @@ func (proxier *Proxier) syncProxyRules(reason syncReason) {
 	svcIntfs, err := proxier.ipvs.GetServices()
 	if err == nil {
 		for _, svcIntf := range svcIntfs {
-			appliedSvc, err := svcIntf.GetService()
+			appliedSvc, err := proxier.ipvs.ToService(svcIntf)
 			if err != nil {
 				glog.Errorf("Failed to get ipvs service, err: %v", err)
 			} else {
@@ -866,13 +866,31 @@ func (proxier *Proxier) syncService(svcName string, ipvsSvc *utilipvs.Service, a
 	var appliedSvc *utilipvs.Service
 	svcIntf, err := proxier.ipvs.GetService(ipvsSvc)
 	if err == nil {
-		appliedSvc, err = svcIntf.GetService()
+		appliedSvc, err = proxier.ipvs.ToService(svcIntf)
 		if err != nil {
 			glog.Errorf("Failed to get ipvs service, err: %v", err)
 		}
 	}
+	if appliedSvc != nil {
+		fmt.Println("appliedSvc")
+		fmt.Println(appliedSvc.Protocol)
+		fmt.Println(appliedSvc.Port)
+		fmt.Println(appliedSvc.Scheduler)
+		fmt.Println(appliedSvc.Flags)
+		fmt.Println(appliedSvc.Timeout)
+	} else {
+		fmt.Println("appliedSvc is empty")
+	}
 	// ipvs service not found or has changed
 	if appliedSvc == nil || !appliedSvc.Equal(ipvsSvc) {
+
+		fmt.Println("ipvsSvc")
+		fmt.Println(ipvsSvc.Protocol)
+		fmt.Println(ipvsSvc.Port)
+		fmt.Println(ipvsSvc.Scheduler)
+		fmt.Println(ipvsSvc.Flags)
+		fmt.Println(ipvsSvc.Timeout)
+
 		if appliedSvc == nil {
 			glog.V(3).Infof("Adding new service %q at %s:%d/%s", svcName, ipvsSvc.Address, ipvsSvc.Port, ipvsSvc.Protocol)
 			if alias {
@@ -904,7 +922,11 @@ func (proxier *Proxier) syncEndpoint(svcPortName proxy.ServicePortName, onlyNode
 	if err != nil || applied == nil {
 		return err
 	}
-	dests, err := applied.GetDestinations()
+	svc, err := proxier.ipvs.ToService(applied)
+	if err != nil {
+		return err
+	}
+	dests, err := proxier.ipvs.GetDestinations(svc)
 	if err != nil {
 		glog.Errorf("Failed to get ipvs service destinations, err: %v", err)
 		return err
@@ -935,7 +957,7 @@ func (proxier *Proxier) syncEndpoint(svcPortName proxy.ServicePortName, onlyNode
 				Weight:  1,
 			}
 
-			err := applied.AddDestination(newDest)
+			err := proxier.ipvs.AddDestination(svc, newDest)
 			if err != nil {
 				if !strings.Contains(err.Error(), "object exists") {
 					glog.Errorf("Error: Cannot add destination: %v, error: %v", newDest, err)
@@ -952,7 +974,7 @@ func (proxier *Proxier) syncEndpoint(svcPortName proxy.ServicePortName, onlyNode
 				Port:    uint16(port),
 			}
 			glog.V(6).Infof("Endpoints: [%v] will be deleted", delDest)
-			err := applied.DeleteDestination(delDest)
+			err := proxier.ipvs.DeleteDestination(svc, delDest)
 			if err != nil {
 				glog.Errorf("Error: Cannot delete destination: %v, error: %v", delDest, err)
 			}
